@@ -34,6 +34,7 @@ final case class JSS_CPResource(resourceName : String, classloader : Option[Clas
   override def applyTo(runner : Runner) = {
     val cl = classloader getOrElse (Thread.currentThread().getContextClassLoader())
     runner.withSource(new InputStreamReader(cl.getResourceAsStream(resourceName), encoding))
+
   }
 }
 
@@ -43,7 +44,11 @@ case object JS_Reset extends JavascriptMessage
 
 final case class JS_Execute(src : JavascriptSource) extends JavascriptMessage
 
+final case class JS_Execute_Seq(src : Seq[JavascriptSource]) extends JavascriptMessage
+
 final case class JS_Evaluate(src : JavascriptSource) extends JavascriptMessage
+
+final case class JS_Evaluate_Seq(src : Seq[JavascriptSource]) extends JavascriptMessage
 
 final case class JS_SubscribeForOutput(ref : Option[ActorRef] = None) extends JavascriptMessage
 
@@ -92,11 +97,25 @@ class JavascriptActor(config : Config = new Config()) extends Actor {
       }
   }
   
+private def doOrException(src : Seq[JavascriptSource])(f : Runner => Any) : Unit = {
+    try {
+        val run = runner()
+        src.map(e => e.applyTo(run))
+        val r = f(run)
+        sender ! JSR_ResultOK(r)
+      } catch {
+        case ex : DynJSException => 
+           sender ! JSR_Exception(ex)
+      }
+  }  
+  
   override def receive : Receive = {
     case JS_Reset => jsInterpreter = new DynJS(config)
                      sender() ! JSR_Reseted
     case JS_Execute(src) => doOrException(src)(_.execute())
+    case JS_Execute_Seq(src) => doOrException(src)(_.execute())
     case JS_Evaluate(src) => doOrException(src)(_.evaluate())
+    case JS_Evaluate_Seq(src) => doOrException(src)(_.evaluate())
     case JS_SubscribeForOutput(ref) => outputListeners += ref.getOrElse(sender())
     case JS_UnsubscribeForOutput(ref) => outputListeners -= ref.getOrElse(sender())
     case JS_SubscribeForError(ref) => errorListeners += ref.getOrElse(sender())
