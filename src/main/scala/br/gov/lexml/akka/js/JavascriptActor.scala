@@ -42,10 +42,16 @@ abstract sealed class JavascriptMessage
 
 case object JS_Reset extends JavascriptMessage 
 
+/**
+ * Executa statemp, não é a intenção obter o resultado
+ */
 final case class JS_Execute(src : JavascriptSource) extends JavascriptMessage
 
 final case class JS_Execute_Seq(src : Seq[JavascriptSource]) extends JavascriptMessage
 
+/**
+ * Execução para obtenção de um resultado (avaliar uma expressão)
+ */
 final case class JS_Evaluate(src : JavascriptSource) extends JavascriptMessage
 
 final case class JS_Evaluate_Seq(src : Seq[JavascriptSource]) extends JavascriptMessage
