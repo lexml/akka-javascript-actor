@@ -13,6 +13,7 @@ import akka.actor.ActorRef
 import java.io.PrintStream
 import br.gov.lexml.eventfilteroutputstream.EventFilterOutputStream
 import br.gov.lexml.eventfilteroutputstream.Event
+import akka.actor.ActorLogging
 
 abstract sealed class JavascriptSource {
   def applyTo(runner : Runner) : Runner
@@ -47,14 +48,10 @@ case object JS_Reset extends JavascriptMessage
  */
 final case class JS_Execute(src : JavascriptSource) extends JavascriptMessage
 
-final case class JS_Execute_Seq(src : Seq[JavascriptSource]) extends JavascriptMessage
-
 /**
  * Execução para obtenção de um resultado (avaliar uma expressão)
  */
 final case class JS_Evaluate(src : JavascriptSource) extends JavascriptMessage
-
-final case class JS_Evaluate_Seq(src : Seq[JavascriptSource]) extends JavascriptMessage
 
 final case class JS_SubscribeForOutput(ref : Option[ActorRef] = None) extends JavascriptMessage
 
@@ -72,56 +69,53 @@ final case class JSR_ResultOK(result : Any)
 
 final case class JSR_Exception(exception : DynJSException)
 
-class JavascriptActor(config : Config = new Config()) extends Actor {
+class JavascriptActor(config : Config = new Config(), sources : Seq[JavascriptSource] = Seq()) extends Actor with ActorLogging {
   private var jsInterpreter : DynJS = _
   
   private var outputListeners : Set[ActorRef] = Set()
   
   private var errorListeners : Set[ActorRef] = Set()
   
-  def eventHandler(listeners : => Set[ActorRef]) : Event => Unit = ev => listeners foreach (_ ! ev)
+  def eventHandler(listeners : => Set[ActorRef]) : Event => Unit = { ev =>
+    log.debug("eventHandler: dispatching event: " + ev)
+    listeners foreach (_ ! ev)
+  }
   
   config.setOutputStream(new PrintStream(new EventFilterOutputStream(eventHandler(outputListeners))))
   
   config.setErrorStream(new PrintStream(new EventFilterOutputStream(eventHandler(errorListeners))))
   
   private def runner() = {
+    log.debug("runner: creating a new runner")
     jsInterpreter.newRunner().withContext( jsInterpreter.getDefaultExecutionContext() )
   }
   
   override def preStart() {
-    jsInterpreter = new DynJS(config)
+    log.info("preStgart: starting the actor: " + self)
+    jsInterpreter = new DynJS(config)    
+    sources.foreach(self ! JS_Execute(_))
   }
  
   private def doOrException(src : JavascriptSource)(f : Runner => Any) : Unit = {
     try {
+        log.debug("doOrException: going to execute")
         val r = f(src.applyTo(runner()))
+        log.debug("doOrException: executed. result: " + r)
         sender ! JSR_ResultOK(r)
       } catch {
         case ex : DynJSException => 
+           log.debug("doOrException: exception occurred:" + ex)
            sender ! JSR_Exception(ex)
       }
   }
   
-private def doOrException(src : Seq[JavascriptSource])(f : Runner => Any) : Unit = {
-    try {
-        val run = runner()
-        src.map(e => e.applyTo(run))
-        val r = f(run)
-        sender ! JSR_ResultOK(r)
-      } catch {
-        case ex : DynJSException => 
-           sender ! JSR_Exception(ex)
-      }
-  }  
   
   override def receive : Receive = {
-    case JS_Reset => jsInterpreter = new DynJS(config)
+    case JS_Reset => log.info("receive: resetting the Javascript VM")
+                     jsInterpreter = new DynJS(config)
                      sender() ! JSR_Reseted
-    case JS_Execute(src) => doOrException(src)(_.execute())
-    case JS_Execute_Seq(src) => doOrException(src)(_.execute())
-    case JS_Evaluate(src) => doOrException(src)(_.evaluate())
-    case JS_Evaluate_Seq(src) => doOrException(src)(_.evaluate())
+    case JS_Execute(src) => doOrException(src)(_.execute())  
+    case JS_Evaluate(src) => doOrException(src)(_.evaluate())    
     case JS_SubscribeForOutput(ref) => outputListeners += ref.getOrElse(sender())
     case JS_UnsubscribeForOutput(ref) => outputListeners -= ref.getOrElse(sender())
     case JS_SubscribeForError(ref) => errorListeners += ref.getOrElse(sender())
