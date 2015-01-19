@@ -69,7 +69,7 @@ final case class JSR_ResultOK(result : Any)
 
 final case class JSR_Exception(exception : DynJSException)
 
-class JavascriptActor(config : Config = new Config(), sources : Seq[JavascriptSource] = Seq()) extends Actor with ActorLogging {
+class JavascriptActor(sources : Seq[JavascriptSource] = Seq(), config : Config = new Config()) extends Actor with ActorLogging {
   private var jsInterpreter : DynJS = _
   
   private var outputListeners : Set[ActorRef] = Set()
